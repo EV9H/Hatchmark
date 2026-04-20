@@ -13,10 +13,17 @@ struct DaemonState<'a> {
     version: &'a str,
 }
 
+/// Commands the IPC layer hands to the daemon's main loop.
+#[derive(Debug, Clone)]
+pub enum DaemonCmd {
+    ReloadBindings,
+    SwitchProfile(String),
+}
+
 pub fn spawn(
     paths: AppPaths,
     rx: Receiver<DaemonMsg>,
-    reload_notify: StdSender<()>,
+    cmd_tx: StdSender<DaemonCmd>,
 ) -> Result<()> {
     std::thread::Builder::new()
         .name("ipc-server".into())
@@ -25,7 +32,7 @@ pub fn spawn(
                 .enable_all()
                 .build()
                 .expect("tokio rt");
-            if let Err(e) = rt.block_on(run(paths, rx, reload_notify)) {
+            if let Err(e) = rt.block_on(run(paths, rx, cmd_tx)) {
                 eprintln!("ipc server exited: {e}");
             }
         })?;
@@ -35,7 +42,7 @@ pub fn spawn(
 async fn run(
     paths: AppPaths,
     rx: Receiver<DaemonMsg>,
-    reload_notify: StdSender<()>,
+    cmd_tx: StdSender<DaemonCmd>,
 ) -> Result<()> {
     let listener = TcpListener::bind((IPC_HOST, 0))
         .await
@@ -65,9 +72,9 @@ async fn run(
     loop {
         let (stream, _) = listener.accept().await?;
         let sub = broadcast_tx.subscribe();
-        let notify = reload_notify.clone();
+        let cmd_tx = cmd_tx.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(stream, sub, notify).await {
+            if let Err(e) = handle_client(stream, sub, cmd_tx).await {
                 tracing::debug!("client error: {e}");
             }
         });
@@ -77,7 +84,7 @@ async fn run(
 async fn handle_client(
     stream: TcpStream,
     mut sub: broadcast::Receiver<DaemonMsg>,
-    reload_notify: StdSender<()>,
+    cmd_tx: StdSender<DaemonCmd>,
 ) -> Result<()> {
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half).lines();
@@ -98,8 +105,15 @@ async fn handle_client(
                         match serde_json::from_str::<UiMsg>(&text) {
                             Ok(UiMsg::Ping) => {}
                             Ok(UiMsg::Subscribe) => {}
-                            Ok(UiMsg::ReloadBindings) => { let _ = reload_notify.send(()); }
-                            Ok(UiMsg::SwitchLayer { .. }) => { let _ = reload_notify.send(()); }
+                            Ok(UiMsg::ReloadBindings) => {
+                                let _ = cmd_tx.send(DaemonCmd::ReloadBindings);
+                            }
+                            Ok(UiMsg::SwitchLayer { .. }) => {
+                                let _ = cmd_tx.send(DaemonCmd::ReloadBindings);
+                            }
+                            Ok(UiMsg::SwitchProfile { name }) => {
+                                let _ = cmd_tx.send(DaemonCmd::SwitchProfile(name));
+                            }
                             Err(e) => tracing::debug!("bad ui msg: {e}: {text}"),
                         }
                     }

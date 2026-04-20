@@ -24,8 +24,9 @@ fn main() -> Result<()> {
         }
     };
 
-    info!("opening db at {}", paths.db_path.display());
-    let db = Db::open(&paths.db_path)?;
+    let db_path = paths.active_profile_db()?;
+    info!("opening db at {}", db_path.display());
+    let db = Db::open(&db_path)?;
 
     if let Some(enabled) = hatchmark_core::db::settings::get_bool(&db.conn, "autostart")? {
         if let Err(e) = autostart::set_enabled(enabled) {

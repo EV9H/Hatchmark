@@ -31,7 +31,7 @@ fn main() -> Result<()> {
     }
 
     let paths = AppPaths::resolve()?;
-    let db = Db::open(&paths.db_path)?;
+    let db = Db::open(&paths.active_profile_db()?)?;
     let state = AppState {
         db: Arc::new(Mutex::new(db)),
         paths: paths.clone(),
@@ -79,6 +79,12 @@ fn main() -> Result<()> {
             commands::settings::set_setting,
             commands::system::reveal_data_dir,
             commands::system::reload_daemon,
+            commands::profiles::list_profiles,
+            commands::profiles::get_active_profile,
+            commands::profiles::create_profile,
+            commands::profiles::delete_profile,
+            commands::profiles::switch_profile,
+            commands::profiles::clear_events,
         ])
         .run(tauri::generate_context!())
         .expect("tauri run");

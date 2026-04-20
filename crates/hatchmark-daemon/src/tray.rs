@@ -1,4 +1,5 @@
 use crate::hotkeys::HotkeyManager;
+use crate::ipc_server::DaemonCmd;
 use crate::toast::{self, ToastEvent};
 use anyhow::Result;
 use hatchmark_core::db::{layers, settings, Db};
@@ -18,10 +19,15 @@ const MENU_ID_LAYER_PREFIX: &str = "layer:";
 
 pub fn run_event_loop(paths: AppPaths, db: Db) -> Result<()> {
     let event_loop = EventLoop::builder().build()?;
-    event_loop.set_control_flow(ControlFlow::Wait);
+    // Poll with a short wait so hotkey + tray + IPC channels get drained
+    // even when no OS window event wakes the loop. 50 ms is imperceptible
+    // for tally counting and keeps idle CPU near zero.
+    event_loop.set_control_flow(ControlFlow::WaitUntil(
+        std::time::Instant::now() + std::time::Duration::from_millis(50),
+    ));
 
     let (broadcast_tx, broadcast_rx) = channel::<DaemonMsg>();
-    let (reload_tx, reload_rx) = channel::<()>();
+    let (cmd_tx, cmd_rx) = channel::<DaemonCmd>();
 
     let mut hotkeys = HotkeyManager::new()?;
     let current = settings::current_layer_id(&db.conn)?;
@@ -35,7 +41,7 @@ pub fn run_event_loop(paths: AppPaths, db: Db) -> Result<()> {
     }
 
     // IPC server takes ownership of broadcast_rx.
-    crate::ipc_server::spawn(paths.clone(), broadcast_rx, reload_tx)?;
+    crate::ipc_server::spawn(paths.clone(), broadcast_rx, cmd_tx)?;
 
     let toast_tx = toast::spawn();
 
@@ -45,7 +51,7 @@ pub fn run_event_loop(paths: AppPaths, db: Db) -> Result<()> {
         db,
         hotkeys,
         broadcast_tx,
-        reload_rx,
+        cmd_rx,
         toast_tx,
     };
     event_loop.run_app(&mut app)?;
@@ -58,7 +64,7 @@ struct App {
     db: Db,
     hotkeys: HotkeyManager,
     broadcast_tx: Sender<DaemonMsg>,
-    reload_rx: Receiver<()>,
+    cmd_rx: Receiver<DaemonCmd>,
     toast_tx: Sender<ToastEvent>,
 }
 
@@ -96,22 +102,10 @@ impl ApplicationHandler for App {
             }
         }
 
-        while self.reload_rx.try_recv().is_ok() {
-            let layer = settings::current_layer_id(&self.db.conn).unwrap_or(1);
-            match self.hotkeys.load_layer(&self.db, layer) {
-                Ok(conflicts) => {
-                    for (key, reason) in conflicts {
-                        let _ = self.broadcast_tx.send(DaemonMsg::BindingConflict {
-                            layer_id: layer,
-                            key_code: key,
-                            reason,
-                        });
-                    }
-                    if let Err(e) = self.install_tray() {
-                        tracing::warn!("refresh tray after reload: {e}");
-                    }
-                }
-                Err(e) => tracing::warn!("reload bindings: {e}"),
+        while let Ok(cmd) = self.cmd_rx.try_recv() {
+            match cmd {
+                DaemonCmd::ReloadBindings => self.reload_bindings(),
+                DaemonCmd::SwitchProfile(name) => self.switch_profile(&name),
             }
         }
     }
@@ -124,9 +118,57 @@ impl ApplicationHandler for App {
         _: winit::event::WindowEvent,
     ) {
     }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Re-arm the 50 ms poll so hotkey / tray / IPC channels keep draining
+        // even when no OS window event wakes us.
+        event_loop.set_control_flow(ControlFlow::WaitUntil(
+            std::time::Instant::now() + std::time::Duration::from_millis(50),
+        ));
+    }
 }
 
 impl App {
+    fn reload_bindings(&mut self) {
+        let layer = settings::current_layer_id(&self.db.conn).unwrap_or(1);
+        match self.hotkeys.load_layer(&self.db, layer) {
+            Ok(conflicts) => {
+                for (key, reason) in conflicts {
+                    let _ = self.broadcast_tx.send(DaemonMsg::BindingConflict {
+                        layer_id: layer,
+                        key_code: key,
+                        reason,
+                    });
+                }
+                if let Err(e) = self.install_tray() {
+                    tracing::warn!("refresh tray after reload: {e}");
+                }
+            }
+            Err(e) => tracing::warn!("reload bindings: {e}"),
+        }
+    }
+
+    fn switch_profile(&mut self, name: &str) {
+        // Persist the choice, reopen the DB, rebuild hotkeys, refresh tray.
+        if let Err(e) = self.paths.set_active_profile(name) {
+            tracing::warn!("set_active_profile: {e}");
+            return;
+        }
+        let _ = crate::shutdown::checkpoint_wal(&self.db.conn);
+        let new_path = self.paths.profile_db(name);
+        match Db::open(&new_path) {
+            Ok(db) => {
+                self.db = db;
+                self.reload_bindings();
+                let _ = self
+                    .broadcast_tx
+                    .send(DaemonMsg::ProfileChanged { name: name.to_string() });
+                tracing::info!("switched to profile '{name}' ({})", new_path.display());
+            }
+            Err(e) => tracing::warn!("open profile db: {e}"),
+        }
+    }
+
     fn install_tray(&mut self) -> Result<()> {
         let icon = load_icon();
         let menu = Menu::new();

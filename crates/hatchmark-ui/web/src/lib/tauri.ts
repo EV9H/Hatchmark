@@ -55,3 +55,13 @@ export const setSetting = (key: string, value: string) =>
 
 export const reloadDaemon = () => invoke<void>('reload_daemon');
 export const revealDataDir = () => invoke<string>('reveal_data_dir');
+
+export const listProfiles = () => invoke<string[]>('list_profiles');
+export const getActiveProfile = () => invoke<string>('get_active_profile');
+export const createProfile = (name: string) =>
+  invoke<void>('create_profile', { name });
+export const deleteProfile = (name: string) =>
+  invoke<void>('delete_profile', { name });
+export const switchProfile = (name: string) =>
+  invoke<void>('switch_profile', { name });
+export const clearEvents = () => invoke<number>('clear_events');

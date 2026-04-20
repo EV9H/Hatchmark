@@ -18,7 +18,13 @@
     revealDataDir,
     getSetting,
     setSetting,
-    exportCsv
+    exportCsv,
+    listProfiles,
+    getActiveProfile,
+    createProfile,
+    deleteProfile,
+    switchProfile,
+    clearEvents
   } from '$lib/tauri';
   import { open as openShell } from '@tauri-apps/plugin-shell';
   import { save as saveDialog } from '@tauri-apps/plugin-dialog';
@@ -26,7 +32,7 @@
   import { bindingConflicts } from '$lib/daemon';
   import type { Channel, Layer, Binding } from '$lib/types';
 
-  type Tab = 'channels' | 'layers' | 'bindings' | 'data';
+  type Tab = 'channels' | 'layers' | 'bindings' | 'profiles' | 'data';
   let tab: Tab = 'channels';
 
   let channels: Channel[] = [];
@@ -37,15 +43,56 @@
   let autostartOn = true;
   let toastOn = false;
 
+  let profiles: string[] = [];
+  let activeProfile = 'default';
+  let newProfileName = '';
+
   async function reloadAll() {
-    [channels, layers, currentLayerId] = await Promise.all([
+    [channels, layers, currentLayerId, profiles, activeProfile] = await Promise.all([
       listChannels(),
       listLayers(),
-      getCurrentLayer()
+      getCurrentLayer(),
+      listProfiles(),
+      getActiveProfile()
     ]);
     bindings = await listBindings(currentLayerId);
     autostartOn = (await getSetting('autostart')) === 'true';
     toastOn = (await getSetting('toast_enabled')) === 'true';
+  }
+
+  async function doSwitchProfile(name: string) {
+    if (name === activeProfile) return;
+    await switchProfile(name);
+    await reloadAll();
+  }
+
+  async function doCreateProfile() {
+    const name = newProfileName.trim();
+    if (!name) return;
+    try {
+      await createProfile(name);
+      newProfileName = '';
+      await reloadAll();
+    } catch (e) {
+      alert(String(e));
+    }
+  }
+
+  async function doDeleteProfile(name: string) {
+    if (!confirm(`Delete profile "${name}" and all its data? This cannot be undone.`)) return;
+    try {
+      await deleteProfile(name);
+      await reloadAll();
+    } catch (e) {
+      alert(String(e));
+    }
+  }
+
+  async function doClearEvents() {
+    if (!confirm(`Clear all counts in profile "${activeProfile}"? Channels and bindings are kept; only the press history is deleted.`)) return;
+    const n = await clearEvents();
+    alert(`Cleared ${n} events.`);
+    await reloadAll();
   }
 
   onMount(reloadAll);
@@ -145,7 +192,7 @@
 
 <div class="space-y-4">
   <div class="flex gap-2 text-sm">
-    {#each ['channels', 'layers', 'bindings', 'data'] as t}
+    {#each ['channels', 'layers', 'bindings', 'profiles', 'data'] as t}
       <button
         class="pressable rounded-xl px-3 py-1 {tab === t
           ? 'bg-white/70 shadow-glass dark:bg-white/10'
@@ -268,6 +315,67 @@
         <span class="text-xs text-neutral-500">
           Press F13-F24. Default action is increment first channel; edit above.
         </span>
+      </div>
+    </div>
+  {:else if tab === 'profiles'}
+    <div class="space-y-2">
+      <div class="text-xs text-neutral-500">
+        Each profile is a separate database. Active profile:
+        <span class="font-medium">{activeProfile}</span>
+      </div>
+      {#each profiles as p (p)}
+        <div class="glass-strong shadow-glass flex items-center gap-2 rounded-2xl p-3">
+          <div class="flex-1 font-medium">
+            {p}
+            {#if p === activeProfile}
+              <span class="ml-2 rounded-full bg-emerald-400/30 px-2 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-300">active</span>
+            {/if}
+            {#if p === 'default'}
+              <span class="ml-2 text-[10px] text-neutral-500">protected</span>
+            {/if}
+          </div>
+          {#if p !== activeProfile}
+            <button
+              class="pressable rounded-xl bg-white/50 px-2 py-1 text-sm dark:bg-white/10"
+              on:click={() => doSwitchProfile(p)}>
+              Switch
+            </button>
+          {/if}
+          {#if p !== 'default' && p !== activeProfile}
+            <button
+              class="pressable rounded-xl px-2 py-1 text-sm text-red-500 hover:bg-red-500/10"
+              on:click={() => doDeleteProfile(p)}>
+              Delete
+            </button>
+          {/if}
+        </div>
+      {/each}
+
+      <div class="glass-strong shadow-glass flex items-center gap-2 rounded-2xl p-3">
+        <input
+          class="flex-1 bg-transparent outline-none"
+          placeholder="new profile name (letters, digits, - _)"
+          bind:value={newProfileName}
+          on:keydown={(e) => e.key === 'Enter' && doCreateProfile()} />
+        <button
+          class="pressable glass rounded-xl px-3 py-1 text-sm"
+          on:click={doCreateProfile}>
+          + Create
+        </button>
+      </div>
+
+      <div class="glass-strong shadow-glass mt-4 flex items-center gap-3 rounded-2xl p-3">
+        <div class="flex-1">
+          <div class="text-sm font-medium text-red-500">Clear counts</div>
+          <div class="text-xs text-neutral-500">
+            Deletes every event in the active profile ("{activeProfile}"). Channels, layers, and bindings stay.
+          </div>
+        </div>
+        <button
+          class="pressable rounded-xl bg-red-500/15 px-3 py-2 text-sm text-red-600 hover:bg-red-500/25 dark:text-red-400"
+          on:click={doClearEvents}>
+          Clear
+        </button>
       </div>
     </div>
   {:else}

@@ -24,6 +24,9 @@ pub enum DaemonMsg {
     ChannelsUpdated {
         channels: Vec<Channel>,
     },
+    ProfileChanged {
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +35,7 @@ pub enum UiMsg {
     Subscribe,
     ReloadBindings,
     SwitchLayer { target_layer_id: i64 },
+    SwitchProfile { name: String },
     Ping,
 }
 
