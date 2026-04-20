@@ -1,0 +1,18 @@
+target/
+**/*.rs.bk
+Cargo.lock.bak
+.vscode/
+.idea/
+*.log
+
+# Node / Vite / SvelteKit
+node_modules/
+.svelte-kit/
+crates/hatchmark-ui/web/build/
+crates/hatchmark-ui/web/.svelte-kit/
+
+# Tauri
+crates/hatchmark-ui/gen/
+
+# Internal design docs and plans — kept local, not on the public remote
+docs/

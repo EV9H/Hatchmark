@@ -1,0 +1,38 @@
+[package]
+name = "hatchmark-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[dependencies]
+hatchmark-core = { path = "../hatchmark-core" }
+anyhow.workspace     = true
+thiserror.workspace  = true
+serde.workspace      = true
+serde_json.workspace = true
+rusqlite.workspace   = true
+chrono.workspace     = true
+tokio.workspace      = true
+tracing.workspace    = true
+tracing-subscriber.workspace = true
+tray-icon = "0.14"
+global-hotkey = "0.5"
+image = { version = "0.25", default-features = false, features = ["ico"] }
+winit = "0.30"
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_LibraryLoader",
+]
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

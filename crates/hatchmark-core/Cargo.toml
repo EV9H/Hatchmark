@@ -1,0 +1,15 @@
+[package]
+name = "hatchmark-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace      = true
+thiserror.workspace   = true
+serde.workspace       = true
+serde_json.workspace  = true
+rusqlite.workspace    = true
+chrono.workspace      = true
+directories.workspace = true
+tracing.workspace     = true

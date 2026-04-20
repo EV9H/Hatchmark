@@ -1,0 +1,37 @@
+[package]
+name = "hatchmark-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+hatchmark-core = { path = "../hatchmark-core" }
+anyhow.workspace     = true
+serde.workspace      = true
+serde_json.workspace = true
+rusqlite.workspace   = true
+chrono.workspace     = true
+tokio.workspace      = true
+tracing.workspace    = true
+tracing-subscriber.workspace = true
+
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+]
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
